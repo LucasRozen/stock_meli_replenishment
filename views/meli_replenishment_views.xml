@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_meli_replenishment_rule_tree" model="ir.ui.view">
+        <field name="name">meli.replenishment.rule.tree</field>
+        <field name="model">meli.replenishment.rule</field>
+        <field name="arch" type="xml">
+            <tree string="Reglas de Reabastecimiento MELI" decoration-muted="not active">
+                <field name="product_id"/>
+                <field name="qty_replenish"/>
+                <field name="active" widget="boolean_toggle"/>
+                <field name="last_trigger"/>
+                <field name="last_source_location"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_meli_replenishment_rule_form" model="ir.ui.view">
+        <field name="name">meli.replenishment.rule.form</field>
+        <field name="model">meli.replenishment.rule</field>
+        <field name="arch" type="xml">
+            <form string="Regla de Reabastecimiento MELI">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="product_id" placeholder="Seleccionar producto..."/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="qty_replenish"/>
+                            <field name="active" widget="boolean_toggle"/>
+                        </group>
+                        <group string="Último reabastecimiento">
+                            <field name="last_trigger"/>
+                            <field name="last_source_location"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_meli_replenishment_rule" model="ir.actions.act_window">
+        <field name="name">Reglas de Reabastecimiento MELI</field>
+        <field name="res_model">meli.replenishment.rule</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Crear la primera regla de reabastecimiento
+            </p>
+            <p>
+                Cuando el stock total de MELI/Stock llega a 0, se crea automáticamente
+                una transferencia interna desde la sub-ubicación R/S con más stock disponible.
+            </p>
+        </field>
+    </record>
+
+    <menuitem
+        id="menu_meli_replenishment_root"
+        name="Reabastecimiento MELI"
+        parent="stock.menu_stock_config_settings"
+        action="action_meli_replenishment_rule"
+        sequence="50"
+        groups="stock.group_stock_manager"/>
+
+</odoo>

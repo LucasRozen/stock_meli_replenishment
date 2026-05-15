@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_meli_replenishment_rule_user,meli.replenishment.rule.user,model_meli_replenishment_rule,stock.group_stock_user,1,0,0,0
+access_meli_replenishment_rule_manager,meli.replenishment.rule.manager,model_meli_replenishment_rule,stock.group_stock_manager,1,1,1,1
+access_meli_publication_wizard_user,meli.publication.wizard.user,model_meli_publication_wizard,stock.group_stock_user,1,1,1,0
+access_meli_publication_wizard_manager,meli.publication.wizard.manager,model_meli_publication_wizard,stock.group_stock_manager,1,1,1,1

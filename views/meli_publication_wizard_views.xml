@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_meli_publication_wizard_form" model="ir.ui.view">
+        <field name="name">meli.publication.wizard.form</field>
+        <field name="model">meli.publication.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Nueva publicación MELI">
+                <group>
+                    <group string="Producto y cantidad">
+                        <field name="product_id"/>
+                        <field name="qty_to_transfer"/>
+                        <field name="crear_regla_reabastecimiento"/>
+                    </group>
+                    <group string="Precio">
+                        <field name="price_usd" readonly="1"/>
+                        <field name="dolar_rogrim"/>
+                        <field name="precio_neto" readonly="1"/>
+                        <field name="gasto_fijo" readonly="1"/>
+                        <field name="precio_base" readonly="1"/>
+                        <field name="precio_final"/>
+                    </group>
+                </group>
+                <footer>
+                    <button name="action_confirm" string="Confirmar" type="object" class="btn-primary"/>
+                    <button string="Cancelar" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_meli_publication_wizard" model="ir.actions.act_window">
+        <field name="name">Nueva publicación MELI</field>
+        <field name="res_model">meli.publication.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <menuitem
+        id="menu_meli_publication_wizard"
+        name="Nueva publicación MELI"
+        parent="stock.menu_stock_config_settings"
+        action="action_meli_publication_wizard"
+        sequence="51"
+        groups="stock.group_stock_manager"/>
+
+</odoo>
