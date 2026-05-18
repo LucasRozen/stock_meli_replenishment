@@ -149,6 +149,23 @@ class MeliPublicationWizard(models.TransientModel):
                 % (rs_loc.complete_name, self.product_id.display_name)
             )
 
+        # Evitar duplicar transferencias: si ya hay un movimiento pendiente
+        # hacia MELI para este producto, no crear otro (mismo chequeo que el
+        # cron en _check_and_replenish).
+        meli_loc = meli_replenishment._get_meli_location()
+        if meli_loc:
+            pending = self.env['stock.move'].search([
+                ('product_id', '=', self.product_id.id),
+                ('location_dest_id', 'child_of', meli_loc.id),
+                ('state', 'not in', ['done', 'cancel']),
+            ], limit=1)
+            if pending:
+                raise UserError(
+                    _('Ya existe una transferencia pendiente hacia MELI para '
+                      '%s (picking %s).')
+                    % (self.product_id.display_name, pending.picking_id.name)
+                )
+
         # Crear picking
         picking = self.env['meli.replenishment.rule']._create_replenishment_picking(
             self.product_id,

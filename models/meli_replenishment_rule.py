@@ -164,21 +164,33 @@ class MeliReplenishmentRule(models.Model):
 
         # action_confirm/action_assign pueden sobrescribir location_dest_id del
         # move con el del picking (MELI/Stock padre). Forzamos el destino
-        # específico (MELI/Stock/x) y reemplazamos las move_lines auto-generadas
-        # con una sola que tiene la cantidad exacta y las ubicaciones correctas.
+        # específico (MELI/Stock/x).
+        #
+        # IMPORTANTE: no borrar las move_lines que generó action_assign(). Esas
+        # líneas llevan la reserva del stock en R/S (reserved_quantity del
+        # quant). Si se borran, la reserva se libera; y crear una move_line
+        # manualmente NO vuelve a reservar (en Odoo 17 el create de move_line
+        # sólo toca quants si el move está 'done'). El picking quedaría
+        # 'assigned' pero el stock de R/S figuraría disponible, y un despacho a
+        # cliente podría reservar las mismas unidades -> R/S en negativo.
+        # Por eso sólo corregimos el destino sobre las líneas ya reservadas.
         for move, src, qty_move, dest in move_data:
             if move.location_dest_id != dest:
                 move.location_dest_id = dest.id
-            move.move_line_ids.unlink()
-            self.env['stock.move.line'].create({
-                'move_id': move.id,
-                'product_id': product.id,
-                'product_uom_id': product.uom_id.id,
-                'quantity': qty_move,
-                'location_id': src.id,
-                'location_dest_id': dest.id,
-                'picking_id': picking.id,
-            })
+            if move.move_line_ids:
+                move.move_line_ids.write({'location_dest_id': dest.id})
+            else:
+                # action_assign() no logró reservar (stock tomado en el ínterin
+                # por otra operación). Creamos la línea manual como fallback.
+                self.env['stock.move.line'].create({
+                    'move_id': move.id,
+                    'product_id': product.id,
+                    'product_uom_id': product.uom_id.id,
+                    'quantity': qty_move,
+                    'location_id': src.id,
+                    'location_dest_id': dest.id,
+                    'picking_id': picking.id,
+                })
 
         sources_summary = ', '.join(
             '%s (%.0f u.)' % (src.complete_name, qty_move)
