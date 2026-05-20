@@ -155,7 +155,11 @@ class MeliReplenishmentRule(models.Model):
                 'picking_id': picking.id,
                 'location_id': src.id,
                 'location_dest_id': dest.id,
-                'picking_intern_from_location_id': src.id,
+                # No seteamos picking_intern_from_location_id: despacho_a_plaza
+                # usa el path de move_lines cuando este campo está vacío, que
+                # respeta el location_dest_id específico de cada línea
+                # (MELI/Stock/xx-YYY) en lugar del location_dest_id del picking
+                # padre (MELI/Stock).
             })
             move_data.append((move, src, qty_move, dest))
 
@@ -288,7 +292,9 @@ class MeliReplenishmentRule(models.Model):
                             line.location_dest_id.complete_name)
 
                 result = picking.with_context(
-                    skip_backorder=True).button_validate()
+                    skip_backorder=True,
+                    is_barcode=True,
+                ).button_validate()
                 if isinstance(result, dict) and result.get('res_model'):
                     wizard = self.env[result['res_model']].browse(
                         result.get('res_id'))
