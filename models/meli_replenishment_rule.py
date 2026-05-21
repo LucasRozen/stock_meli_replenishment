@@ -16,7 +16,11 @@ class MeliReplenishmentRule(models.Model):
         'product.product', string='Producto', required=True, index=True,
         domain=[('type', 'in', ['product', 'consu'])],
     )
-    qty_replenish = fields.Float('Unidades a reponer', default=10.0, required=True)
+    percent_replenish = fields.Float(
+        'Porcentaje a reponer (%)', default=50.0, required=True,
+        help='Porcentaje del stock disponible en R/S que se transferirá a '
+             'MELI/Stock cuando se ejecute el reabastecimiento.',
+    )
     active = fields.Boolean(default=True)
     last_trigger = fields.Datetime('Último reabastecimiento creado', readonly=True)
     last_source_location = fields.Many2one(
@@ -24,8 +28,11 @@ class MeliReplenishmentRule(models.Model):
     )
 
     _sql_constraints = [
-        ('product_unique', 'UNIQUE(product_id)', 'Ya existe una regla para este producto.'),
-        ('qty_replenish_positive', 'CHECK(qty_replenish > 0)', 'Las unidades a reponer deben ser mayores a 0.'),
+        ('product_unique', 'UNIQUE(product_id)',
+         'Ya existe una regla para este producto.'),
+        ('percent_replenish_valid',
+         'CHECK(percent_replenish > 0 AND percent_replenish <= 100)',
+         'El porcentaje debe estar entre 0 y 100.'),
     ]
 
     @api.model
@@ -250,10 +257,37 @@ class MeliReplenishmentRule(models.Model):
             )
             return
 
-        # 3. Delegar creación del picking al helper
+        # 3. Calcular cantidad a reponer = porcentaje del stock disponible en R/S
+        rs_quants = self.env['stock.quant'].search([
+            ('product_id', '=', product.id),
+            ('location_id', 'child_of', rs_loc.id),
+            ('quantity', '>', 0),
+        ])
+        total_available = sum(
+            max(0.0, q.quantity - q.reserved_quantity) for q in rs_quants
+        )
+        if total_available <= 0:
+            _logger.warning(
+                'Sin stock disponible en %s para %s (todo reservado).',
+                RS_STOCK_NAME, product.display_name,
+            )
+            return
+
+        qty_to_replenish = int(
+            total_available * self.percent_replenish / 100.0
+        )
+        if qty_to_replenish <= 0:
+            _logger.warning(
+                'Porcentaje %.2f%% sobre %.0f disponibles da 0 unidades para %s.',
+                self.percent_replenish, total_available,
+                product.display_name,
+            )
+            return
+
+        # 4. Delegar creación del picking al helper
         picking = self._create_replenishment_picking(
             product,
-            self.qty_replenish,
+            qty_to_replenish,
             meli_loc,
             rs_loc,
         )

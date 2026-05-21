@@ -58,6 +58,12 @@ class MeliPublicationWizard(models.TransientModel):
         'Crear regla de reabastecimiento automático',
         default=True,
     )
+    percent_replenish = fields.Float(
+        'Porcentaje a reponer (%)',
+        default=50.0,
+        help='Porcentaje del stock disponible en R/S que se transferirá a '
+             'MELI/Stock cuando se ejecute la regla de reabastecimiento.',
+    )
     picking_id = fields.Many2one(
         'stock.picking',
         string='Picking creado',
@@ -188,11 +194,11 @@ class MeliPublicationWizard(models.TransientModel):
                 ('product_id', '=', self.product_id.id),
             ])
             if rule:
-                rule.qty_replenish = self.qty_to_transfer
+                rule.percent_replenish = self.percent_replenish
             else:
                 self.env['meli.replenishment.rule'].create({
                     'product_id': self.product_id.id,
-                    'qty_replenish': self.qty_to_transfer,
+                    'percent_replenish': self.percent_replenish,
                 })
 
         return {

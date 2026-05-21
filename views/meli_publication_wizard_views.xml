@@ -11,6 +11,8 @@
                         <field name="product_id"/>
                         <field name="qty_to_transfer"/>
                         <field name="crear_regla_reabastecimiento"/>
+                        <field name="percent_replenish"
+                               invisible="not crear_regla_reabastecimiento"/>
                     </group>
                     <group string="Precio">
                         <field name="price_usd" readonly="1"/>

@@ -7,7 +7,7 @@
         <field name="arch" type="xml">
             <tree string="Reglas de Reabastecimiento MELI" decoration-muted="not active">
                 <field name="product_id"/>
-                <field name="qty_replenish"/>
+                <field name="percent_replenish"/>
                 <field name="active" widget="boolean_toggle"/>
                 <field name="last_trigger"/>
                 <field name="last_source_location"/>
@@ -28,7 +28,7 @@
                     </div>
                     <group>
                         <group>
-                            <field name="qty_replenish"/>
+                            <field name="percent_replenish"/>
                             <field name="active" widget="boolean_toggle"/>
                         </group>
                         <group string="Último reabastecimiento">
