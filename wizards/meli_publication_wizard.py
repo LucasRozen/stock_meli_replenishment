@@ -23,6 +23,19 @@ class MeliPublicationWizard(models.TransientModel):
         default=10.0,
         required=True,
     )
+    available_location_ids = fields.Many2many(
+        'stock.location',
+        compute='_compute_available_location_ids',
+        help='Sub-ubicaciones R/S con stock disponible del producto elegido.',
+    )
+    source_location_id = fields.Many2one(
+        'stock.location',
+        string='Ubicación de origen (R/S)',
+        domain="[('id', 'in', available_location_ids)]",
+        help='Sub-ubicación R/S desde la que se transferirán las unidades. '
+             'Si se deja vacío, se toma automáticamente de la(s) ubicación(es) '
+             'con más stock.',
+    )
     price_usd = fields.Float(
         'Precio USD',
         readonly=True,
@@ -85,8 +98,28 @@ class MeliPublicationWizard(models.TransientModel):
             res['dolar_rogrim'] = self._default_dolar_rogrim()
         return res
 
+    @api.depends('product_id')
+    def _compute_available_location_ids(self):
+        rule_model = self.env['meli.replenishment.rule']
+        rs_loc = rule_model._get_rs_location()
+        for w in self:
+            if not w.product_id or not rs_loc:
+                w.available_location_ids = False
+                continue
+            quants = self.env['stock.quant'].search([
+                ('product_id', '=', w.product_id.id),
+                ('location_id', 'child_of', rs_loc.id),
+                ('quantity', '>', 0),
+            ])
+            locs = quants.filtered(
+                lambda q: q.quantity - q.reserved_quantity > 0
+            ).mapped('location_id')
+            w.available_location_ids = locs
+
     @api.onchange('product_id')
     def _onchange_product_id(self):
+        # Al cambiar de producto, limpiar la ubicación elegida (puede no aplicar)
+        self.source_location_id = False
         if self.product_id:
             self.price_usd = self.product_id.product_tmpl_id.price_usd or 0.0
         else:
@@ -143,16 +176,25 @@ class MeliPublicationWizard(models.TransientModel):
         if not rs_loc:
             raise UserError(_('No se encontró la ubicación R/S configurada.'))
 
-        rs_quants = self.env['stock.quant'].search([
+        # Si el usuario eligió una ubicación, validar stock sólo en ella.
+        src_domain = [
             ('product_id', '=', self.product_id.id),
-            ('location_id', 'child_of', rs_loc.id),
             ('quantity', '>', 0),
-        ])
+        ]
+        if self.source_location_id:
+            src_domain.append(
+                ('location_id', 'child_of', self.source_location_id.id))
+            sin_stock_loc = self.source_location_id.complete_name
+        else:
+            src_domain.append(('location_id', 'child_of', rs_loc.id))
+            sin_stock_loc = rs_loc.complete_name
+
+        rs_quants = self.env['stock.quant'].search(src_domain)
 
         if not rs_quants:
             raise UserError(
                 _('Sin stock disponible en %s para %s.')
-                % (rs_loc.complete_name, self.product_id.display_name)
+                % (sin_stock_loc, self.product_id.display_name)
             )
 
         # Evitar duplicar transferencias: si ya hay un movimiento pendiente
@@ -172,10 +214,11 @@ class MeliPublicationWizard(models.TransientModel):
                     % (self.product_id.display_name, pending.picking_id.name)
                 )
 
-        # Crear picking
+        # Crear picking (desde la ubicación elegida, o automático si no se eligió)
         picking = self.env['meli.replenishment.rule']._create_replenishment_picking(
             self.product_id,
             self.qty_to_transfer,
+            forced_src_location=self.source_location_id or None,
         )
 
         if not picking:

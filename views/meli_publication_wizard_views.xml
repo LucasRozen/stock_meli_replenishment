@@ -9,6 +9,9 @@
                 <group>
                     <group string="Producto y cantidad">
                         <field name="product_id"/>
+                        <field name="available_location_ids" invisible="1"/>
+                        <field name="source_location_id"
+                               options="{'no_create': True, 'no_open': True}"/>
                         <field name="qty_to_transfer"/>
                         <field name="crear_regla_reabastecimiento"/>
                         <field name="percent_replenish"

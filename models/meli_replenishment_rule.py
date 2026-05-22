@@ -92,8 +92,10 @@ class MeliReplenishmentRule(models.Model):
         return meli_loc
 
     @api.model
-    def _create_replenishment_picking(self, product, qty, meli_loc=None, rs_loc=None):
+    def _create_replenishment_picking(self, product, qty, meli_loc=None,
+                                      rs_loc=None, forced_src_location=None):
         """Crea picking R/S → MELI/Stock por la cantidad pedida.
+        Si se pasa forced_src_location, sólo toma stock de esa sub-ubicación.
         Devuelve el picking creado, o False si no hay stock disponible en R/S."""
         if not meli_loc:
             meli_loc = self._get_meli_location()
@@ -103,12 +105,19 @@ class MeliReplenishmentRule(models.Model):
         if not meli_loc or not rs_loc:
             return False
 
-        # 1. Sub-ubicaciones R/S con stock disponible (ordenadas por cantidad desc)
-        rs_quants = self.env['stock.quant'].search([
+        # 1. Sub-ubicaciones R/S con stock disponible (ordenadas por cantidad desc).
+        #    Si se forzó una ubicación, restringe la búsqueda a esa sub-ubicación.
+        quant_domain = [
             ('product_id', '=', product.id),
-            ('location_id', 'child_of', rs_loc.id),
             ('quantity', '>', 0),
-        ], order='quantity desc')
+        ]
+        if forced_src_location:
+            quant_domain.append(('location_id', 'child_of', forced_src_location.id))
+        else:
+            quant_domain.append(('location_id', 'child_of', rs_loc.id))
+        rs_quants = self.env['stock.quant'].search(
+            quant_domain, order='quantity desc',
+        )
 
         if not rs_quants:
             _logger.warning(
