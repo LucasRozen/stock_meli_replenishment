@@ -55,7 +55,7 @@ class MeliReplenishmentRule(models.Model):
          'El porcentaje debe estar entre 0 y 100.'),
     ]
 
-    @api.depends()
+    @api.depends_context('uid')
     def _compute_available_product_ids(self):
         # Productos publicados en MELI (list_price > 1) sin regla existente
         rules = self.env['meli.replenishment.rule'].search([])
