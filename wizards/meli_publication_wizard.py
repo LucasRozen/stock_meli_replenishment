@@ -239,15 +239,6 @@ class MeliPublicationWizard(models.TransientModel):
             # Setear ubicación origen si fue elegida en el wizard
             if self.source_location_id:
                 rule_vals['source_location_id'] = self.source_location_id.id
-            # Calcular y setear ubicación destino basada en origen
-            meli_replenishment = self.env['meli.replenishment.rule']
-            rs_loc = meli_replenishment._get_rs_location()
-            meli_loc = meli_replenishment._get_meli_location()
-            if self.source_location_id and meli_loc and rs_loc:
-                dest_loc = meli_replenishment._get_dest_location(
-                    self.source_location_id, meli_loc, rs_loc,
-                )
-                rule_vals['dest_location_id'] = dest_loc.id
 
             rule = self.env['meli.replenishment.rule'].search([
                 ('product_id', '=', self.product_id.id),
