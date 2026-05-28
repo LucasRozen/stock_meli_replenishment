@@ -12,14 +12,10 @@ class MeliReplenishmentRule(models.Model):
     _description = 'Regla de Reabastecimiento MELI'
     _order = 'product_id'
 
-    available_product_ids = fields.Many2many(
-        'product.product',
-        compute='_compute_available_product_ids',
-        help='Productos publicados en MELI sin regla de reabastecimiento.',
-    )
     product_id = fields.Many2one(
         'product.product', string='Producto', required=True, index=True,
-        domain="[('id', 'in', available_product_ids)]",
+        domain="[('type', 'in', ['product', 'consu']),"
+               " ('list_price', '>', 1)]",
         help='Sólo se muestran productos ya publicados en MELI '
              '(Precio MELI > 1) sin regla existente.',
     )
@@ -54,21 +50,6 @@ class MeliReplenishmentRule(models.Model):
          'CHECK(percent_replenish > 0 AND percent_replenish <= 100)',
          'El porcentaje debe estar entre 0 y 100.'),
     ]
-
-    @api.depends_context('uid')
-    def _compute_available_product_ids(self):
-        # Productos publicados en MELI (list_price > 1) sin regla existente
-        rules = self.env['meli.replenishment.rule'].search([])
-        used_ids = rules.filtered(
-            lambda r: r.id not in self.ids
-        ).mapped('product_id').ids
-        products = self.env['product.product'].search([
-            ('type', 'in', ['product', 'consu']),
-            ('list_price', '>', 1),
-            ('id', 'not in', used_ids),
-        ])
-        for rule in self:
-            rule.available_product_ids = products
 
     @api.depends('product_id')
     def _compute_available_location_ids(self):
