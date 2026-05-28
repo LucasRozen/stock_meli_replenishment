@@ -14,7 +14,10 @@ class MeliReplenishmentRule(models.Model):
 
     product_id = fields.Many2one(
         'product.product', string='Producto', required=True, index=True,
-        domain=[('type', 'in', ['product', 'consu'])],
+        domain=[('type', 'in', ['product', 'consu']),
+                ('list_price', '>', 1)],
+        help='Sólo se muestran productos ya publicados en MELI '
+             '(Precio MELI > 1).',
     )
     percent_replenish = fields.Float(
         'Porcentaje a reponer (%)', default=50.0, required=True,
