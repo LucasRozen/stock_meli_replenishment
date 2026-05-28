@@ -233,16 +233,30 @@ class MeliPublicationWizard(models.TransientModel):
 
         # Crear o actualizar regla de reabastecimiento
         if self.crear_regla_reabastecimiento:
+            rule_vals = {
+                'percent_replenish': self.percent_replenish,
+            }
+            # Setear ubicación origen si fue elegida en el wizard
+            if self.source_location_id:
+                rule_vals['source_location_id'] = self.source_location_id.id
+            # Calcular y setear ubicación destino basada en origen
+            meli_replenishment = self.env['meli.replenishment.rule']
+            rs_loc = meli_replenishment._get_rs_location()
+            meli_loc = meli_replenishment._get_meli_location()
+            if self.source_location_id and meli_loc and rs_loc:
+                dest_loc = meli_replenishment._get_dest_location(
+                    self.source_location_id, meli_loc, rs_loc,
+                )
+                rule_vals['dest_location_id'] = dest_loc.id
+
             rule = self.env['meli.replenishment.rule'].search([
                 ('product_id', '=', self.product_id.id),
             ])
             if rule:
-                rule.percent_replenish = self.percent_replenish
+                rule.write(rule_vals)
             else:
-                self.env['meli.replenishment.rule'].create({
-                    'product_id': self.product_id.id,
-                    'percent_replenish': self.percent_replenish,
-                })
+                rule_vals['product_id'] = self.product_id.id
+                self.env['meli.replenishment.rule'].create(rule_vals)
 
         return {
             'type': 'ir.actions.client',

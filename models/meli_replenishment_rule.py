@@ -24,6 +24,21 @@ class MeliReplenishmentRule(models.Model):
         help='Porcentaje del stock disponible en R/S que se transferirá a '
              'MELI/Stock cuando se ejecute el reabastecimiento.',
     )
+    source_location_id = fields.Many2one(
+        'stock.location', string='Ubicación de origen (R/S/x)',
+        domain=[('usage', '=', 'internal'),
+                ('complete_name', 'like', 'R/S/')],
+        help='Sub-ubicación R/S desde la que se tomarán las unidades. '
+             'Si se deja vacío, se toman automáticamente de la(s) ubicación(es) '
+             'con más stock.',
+    )
+    dest_location_id = fields.Many2one(
+        'stock.location', string='Ubicación destino (MELI/Stock/x)',
+        domain=[('usage', '=', 'internal'),
+                ('complete_name', 'like', 'MELI/Stock/')],
+        help='Sub-ubicación MELI/Stock donde se recibirán las unidades. '
+             'Si se deja vacío, se usa automáticamente MELI/Stock padre.',
+    )
     active = fields.Boolean(default=True)
     last_trigger = fields.Datetime('Último reabastecimiento creado', readonly=True)
     last_source_location = fields.Many2one(
@@ -96,9 +111,11 @@ class MeliReplenishmentRule(models.Model):
 
     @api.model
     def _create_replenishment_picking(self, product, qty, meli_loc=None,
-                                      rs_loc=None, forced_src_location=None):
+                                      rs_loc=None, forced_src_location=None,
+                                      forced_dest_location=None):
         """Crea picking R/S → MELI/Stock por la cantidad pedida.
         Si se pasa forced_src_location, sólo toma stock de esa sub-ubicación.
+        Si se pasa forced_dest_location, usa esa como destino para todos.
         Devuelve el picking creado, o False si no hay stock disponible en R/S."""
         if not meli_loc:
             meli_loc = self._get_meli_location()
@@ -139,9 +156,13 @@ class MeliReplenishmentRule(models.Model):
             if available <= 0:
                 continue
             qty_from_this = min(available, remaining)
-            dest = self._get_dest_location(
-                quant.location_id, meli_loc, rs_loc,
-            )
+            # Si se forzó destino, usarlo. Si no, calcular automáticamente.
+            if forced_dest_location:
+                dest = forced_dest_location
+            else:
+                dest = self._get_dest_location(
+                    quant.location_id, meli_loc, rs_loc,
+                )
             transfers.append((quant.location_id, qty_from_this, dest))
             remaining -= qty_from_this
 
@@ -302,6 +323,8 @@ class MeliReplenishmentRule(models.Model):
             qty_to_replenish,
             meli_loc,
             rs_loc,
+            forced_src_location=self.source_location_id or None,
+            forced_dest_location=self.dest_location_id or None,
         )
 
         if not picking:
