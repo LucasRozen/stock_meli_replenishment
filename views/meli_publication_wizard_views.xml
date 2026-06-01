@@ -11,6 +11,7 @@
                         <field name="product_id"/>
                         <field name="available_location_ids" invisible="1"/>
                         <field name="source_location_id"
+                               context="{'stock_location_product_id': product_id}"
                                options="{'no_create': True, 'no_open': True}"/>
                         <field name="available_qty_selected_location" readonly="1"/>
                         <field name="total_available_qty" readonly="1"/>
