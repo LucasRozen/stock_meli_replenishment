@@ -36,6 +36,16 @@ class MeliPublicationWizard(models.TransientModel):
              'Si se deja vacío, se toma automáticamente de la(s) ubicación(es) '
              'con más stock.',
     )
+    available_qty_selected_location = fields.Float(
+        'Disponibles en ubicación elegida',
+        compute='_compute_available_qty',
+        readonly=True,
+    )
+    total_available_qty = fields.Float(
+        'Total disponible en R/S',
+        compute='_compute_total_available_qty',
+        readonly=True,
+    )
     price_usd = fields.Float(
         'Precio USD',
         readonly=True,
@@ -125,6 +135,46 @@ class MeliPublicationWizard(models.TransientModel):
         else:
             self.price_usd = 0.0
 
+    @api.depends('product_id', 'source_location_id')
+    def _compute_available_qty(self):
+        rule_model = self.env['meli.replenishment.rule']
+        rs_loc = rule_model._get_rs_location()
+        for w in self:
+            if not w.product_id or not rs_loc:
+                w.available_qty_selected_location = 0.0
+                continue
+            if w.source_location_id:
+                quants = self.env['stock.quant'].search([
+                    ('product_id', '=', w.product_id.id),
+                    ('location_id', 'child_of', w.source_location_id.id),
+                ])
+            else:
+                quants = self.env['stock.quant'].search([
+                    ('product_id', '=', w.product_id.id),
+                    ('location_id', 'child_of', rs_loc.id),
+                ])
+            available = sum(
+                max(0.0, q.quantity - q.reserved_quantity) for q in quants
+            )
+            w.available_qty_selected_location = available
+
+    @api.depends('product_id')
+    def _compute_total_available_qty(self):
+        rule_model = self.env['meli.replenishment.rule']
+        rs_loc = rule_model._get_rs_location()
+        for w in self:
+            if not w.product_id or not rs_loc:
+                w.total_available_qty = 0.0
+                continue
+            quants = self.env['stock.quant'].search([
+                ('product_id', '=', w.product_id.id),
+                ('location_id', 'child_of', rs_loc.id),
+            ])
+            total = sum(
+                max(0.0, q.quantity - q.reserved_quantity) for q in quants
+            )
+            w.total_available_qty = total
+
     @api.depends('price_usd', 'dolar_rogrim')
     def _compute_precio_neto(self):
         for w in self:
@@ -195,6 +245,17 @@ class MeliPublicationWizard(models.TransientModel):
             raise UserError(
                 _('Sin stock disponible en %s para %s.')
                 % (sin_stock_loc, self.product_id.display_name)
+            )
+
+        # Validar que qty_to_transfer no exceda el stock disponible
+        available_qty = sum(
+            max(0.0, q.quantity - q.reserved_quantity) for q in rs_quants
+        )
+        if self.qty_to_transfer > available_qty:
+            raise UserError(
+                _('No hay suficientes unidades disponibles en %s. '
+                  'Disponibles: %.0f, Solicitadas: %.0f.')
+                % (sin_stock_loc, available_qty, self.qty_to_transfer)
             )
 
         # Evitar duplicar transferencias: si ya hay un movimiento pendiente
