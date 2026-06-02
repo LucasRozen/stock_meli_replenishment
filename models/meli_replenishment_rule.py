@@ -133,7 +133,8 @@ class MeliReplenishmentRule(models.Model):
     def _create_replenishment_picking(self, product, qty, meli_loc=None,
                                       rs_loc=None, forced_src_location=None):
         """Crea picking R/S → MELI/Stock por la cantidad pedida.
-        Si se pasa forced_src_location, sólo toma stock de esa sub-ubicación.
+        Si se pasa forced_src_location, prioriza esa sub-ubicación y, si no
+        alcanza, completa con las demás sub-ubicaciones de R/S (mayor a menor).
         El destino se calcula automáticamente por sufijo (R/S/x → MELI/Stock/x).
         Devuelve el picking creado, o False si no hay stock disponible en R/S."""
         if not meli_loc:
@@ -145,18 +146,11 @@ class MeliReplenishmentRule(models.Model):
             return False
 
         # 1. Sub-ubicaciones R/S con stock disponible (ordenadas por cantidad desc).
-        #    Si se forzó una ubicación, restringe la búsqueda a esa sub-ubicación.
-        quant_domain = [
+        rs_quants = self.env['stock.quant'].search([
             ('product_id', '=', product.id),
+            ('location_id', 'child_of', rs_loc.id),
             ('quantity', '>', 0),
-        ]
-        if forced_src_location:
-            quant_domain.append(('location_id', 'child_of', forced_src_location.id))
-        else:
-            quant_domain.append(('location_id', 'child_of', rs_loc.id))
-        rs_quants = self.env['stock.quant'].search(
-            quant_domain, order='quantity desc',
-        )
+        ], order='quantity desc')
 
         if not rs_quants:
             _logger.warning(
@@ -164,6 +158,19 @@ class MeliReplenishmentRule(models.Model):
                 RS_STOCK_NAME, product.display_name,
             )
             return False
+
+        # Si hay ubicación forzada, ordenar sus quants primero y el resto
+        # después (cada grupo por cantidad desc). Así se prioriza la fija y se
+        # cae automáticamente a las demás cuando no alcanza.
+        if forced_src_location:
+            forced_ids = self.env['stock.location'].search([
+                ('id', 'child_of', forced_src_location.id),
+            ]).ids
+            forced = rs_quants.filtered(
+                lambda q: q.location_id.id in forced_ids
+            )
+            rest = rs_quants - forced
+            rs_quants = forced + rest
 
         # 2. Acumular ubicaciones de origen hasta cubrir qty.
         remaining = qty
