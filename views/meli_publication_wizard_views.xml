@@ -6,6 +6,12 @@
         <field name="model">meli.publication.wizard</field>
         <field name="arch" type="xml">
             <form string="Nueva publicación MELI">
+                <div class="alert alert-info text-center" role="status"
+                     invisible="not product_id" style="margin-bottom:0;">
+                    <field name="total_available_qty" class="oe_inline"
+                           nolabel="1" readonly="1"/>
+                    <strong> unidades disponibles en total (R/S)</strong>
+                </div>
                 <group>
                     <group string="Producto y cantidad">
                         <field name="product_id"/>
@@ -13,8 +19,6 @@
                         <field name="source_location_id"
                                context="{'stock_location_product_id': product_id}"
                                options="{'no_create': True, 'no_open': True}"/>
-                        <field name="available_qty_selected_location" readonly="1"/>
-                        <field name="total_available_qty" readonly="1"/>
                         <field name="qty_to_transfer"/>
                         <field name="crear_regla_reabastecimiento"/>
                         <field name="percent_replenish"
