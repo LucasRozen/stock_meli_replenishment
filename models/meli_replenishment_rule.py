@@ -324,6 +324,14 @@ class MeliReplenishmentRule(models.Model):
         qty_to_replenish = int(
             total_available * self.percent_replenish / 100.0
         )
+        # Log de diagnóstico: deja registro exacto de lo que vio el cron al
+        # calcular, para poder auditar discrepancias de cantidad.
+        _logger.info(
+            'Cálculo reabastecimiento %s: disponible R/S=%.2f, %% =%.2f, '
+            'cantidad calculada=%d',
+            product.display_name, total_available, self.percent_replenish,
+            qty_to_replenish,
+        )
         if qty_to_replenish <= 0:
             _logger.warning(
                 'Porcentaje %.2f%% sobre %.0f disponibles da 0 unidades para %s.',
