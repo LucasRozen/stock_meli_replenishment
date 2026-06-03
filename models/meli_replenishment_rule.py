@@ -25,6 +25,12 @@ class MeliReplenishmentRule(models.Model):
         help='Porcentaje del stock disponible en R/S que se transferirá a '
              'MELI/Stock cuando se ejecute el reabastecimiento.',
     )
+    min_stock = fields.Float(
+        'Stock mínimo en MELI', default=0.0, required=True,
+        help='Cuando el stock disponible en MELI/Stock sea menor o igual a '
+             'este valor, se dispara el reabastecimiento. Con 0, se repone '
+             'sólo cuando MELI llega a 0.',
+    )
     available_location_ids = fields.Many2many(
         'stock.location',
         compute='_compute_available_location_ids',
@@ -50,6 +56,9 @@ class MeliReplenishmentRule(models.Model):
         ('percent_replenish_valid',
          'CHECK(percent_replenish > 0 AND percent_replenish <= 100)',
          'El porcentaje debe estar entre 0 y 100.'),
+        ('min_stock_valid',
+         'CHECK(min_stock >= 0)',
+         'El stock mínimo no puede ser negativo.'),
     ]
 
     @api.depends('product_id')
@@ -297,7 +306,8 @@ class MeliReplenishmentRule(models.Model):
         ])
         total_meli = sum(q.quantity - q.reserved_quantity for q in meli_quants)
 
-        if total_meli > 0:
+        # Reabastecer sólo si el stock en MELI está en o por debajo del mínimo.
+        if total_meli > self.min_stock:
             return
 
         # 2. Evitar duplicados: no crear si ya hay una transferencia pendiente hacia MELI

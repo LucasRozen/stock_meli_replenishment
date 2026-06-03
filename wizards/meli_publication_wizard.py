@@ -82,6 +82,13 @@ class MeliPublicationWizard(models.TransientModel):
         help='Porcentaje del stock disponible en R/S que se transferirá a '
              'MELI/Stock cuando se ejecute la regla de reabastecimiento.',
     )
+    min_stock = fields.Float(
+        'Stock mínimo en MELI',
+        default=0.0,
+        help='Cuando el stock en MELI/Stock sea menor o igual a este valor, '
+             'se dispara el reabastecimiento. Con 0, se repone sólo cuando '
+             'MELI llega a 0.',
+    )
     picking_id = fields.Many2one(
         'stock.picking',
         string='Picking creado',
@@ -268,6 +275,7 @@ class MeliPublicationWizard(models.TransientModel):
         if self.crear_regla_reabastecimiento:
             rule_vals = {
                 'percent_replenish': self.percent_replenish,
+                'min_stock': self.min_stock,
             }
             # Setear ubicación origen si fue elegida en el wizard
             if self.source_location_id:

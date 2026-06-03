@@ -7,6 +7,7 @@
         <field name="arch" type="xml">
             <tree string="Reglas de Reabastecimiento MELI" decoration-muted="not active">
                 <field name="product_id"/>
+                <field name="min_stock"/>
                 <field name="percent_replenish"/>
                 <field name="source_location_id"/>
                 <field name="active" widget="boolean_toggle"/>
@@ -31,6 +32,7 @@
                     </div>
                     <group>
                         <group string="Configuración">
+                            <field name="min_stock"/>
                             <field name="percent_replenish"/>
                             <field name="available_location_ids" invisible="1"/>
                             <field name="source_location_id"
@@ -56,8 +58,9 @@
                 Crear la primera regla de reabastecimiento
             </p>
             <p>
-                Cuando el stock total de MELI/Stock llega a 0, se crea automáticamente
-                una transferencia interna desde la sub-ubicación R/S con más stock disponible.
+                Cuando el stock de MELI/Stock llega al mínimo configurado, se crea
+                automáticamente una transferencia interna desde la sub-ubicación R/S
+                con más stock disponible.
             </p>
         </field>
     </record>

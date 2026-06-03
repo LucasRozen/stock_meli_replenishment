@@ -23,6 +23,8 @@
                             <span> unidades</span>
                         </div>
                         <field name="crear_regla_reabastecimiento"/>
+                        <field name="min_stock"
+                               invisible="not crear_regla_reabastecimiento"/>
                         <field name="percent_replenish"
                                invisible="not crear_regla_reabastecimiento"/>
                     </group>
