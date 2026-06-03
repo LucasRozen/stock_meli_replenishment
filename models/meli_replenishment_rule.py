@@ -1,5 +1,6 @@
 import logging
 from odoo import api, fields, models, _
+from odoo.exceptions import ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -373,22 +374,6 @@ class MeliReplenishmentRule(models.Model):
         validated = []
         for picking in pickings:
             try:
-                move_line_count = sum(len(m.move_line_ids)
-                                      for m in picking.move_ids)
-                _logger.info(
-                    'DEBUG: Validando picking %s (state=%s, moves=%d, '
-                    'move_lines=%d)',
-                    picking.name, picking.state, len(picking.move_ids),
-                    move_line_count)
-                for move in picking.move_ids:
-                    for line in move.move_line_ids:
-                        _logger.info(
-                            '  Move_line: product=%s, qty=%s, '
-                            'loc=%s → %s',
-                            line.product_id.default_code, line.quantity,
-                            line.location_id.complete_name,
-                            line.location_dest_id.complete_name)
-
                 result = picking.with_context(
                     skip_backorder=True,
                     is_barcode=True,
@@ -408,6 +393,20 @@ class MeliReplenishmentRule(models.Model):
                     _logger.warning(
                         'Picking %s no quedó en done (state=%s).',
                         picking.name, picking.state)
+            except ValidationError as e:
+                msg = str(e)
+                # despacho_a_plaza lanza ValidationError cuando los
+                # numero.despacho aún no están sincronizados con el quant.
+                # Es un estado transitorio: el cron reintentará en 1 minuto.
+                if '[PICKING]' in msg or 'despacho' in msg.lower():
+                    _logger.info(
+                        'Picking %s: numero.despacho aún no disponible '
+                        '(%s), se reintentará en el próximo ciclo.',
+                        picking.name, msg.strip())
+                else:
+                    _logger.error(
+                        'Picking %s: error de validación: %s',
+                        picking.name, msg.strip())
             except Exception:
                 _logger.exception('Error al validar picking %s.',
                                   picking.name)
