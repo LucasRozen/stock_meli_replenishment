@@ -393,15 +393,9 @@ class MeliPublicationWizard(models.TransientModel):
                 _('No se pudo crear la transferencia de los componentes.'))
 
         # Crear reglas de reabastecimiento por componente (las que falten).
-        # Sólo para componentes publicados individualmente en MELI
-        # (list_price > 1); los no publicados se omiten.
         creadas = []
-        omitidos = []
         if self.crear_regla_reabastecimiento:
             for component, _qty_per_kit in components:
-                if component.list_price <= 1:
-                    omitidos.append(component.display_name)
-                    continue
                 existing = meli_replenishment.search([
                     ('product_id', '=', component.id),
                 ], limit=1)
@@ -414,12 +408,10 @@ class MeliPublicationWizard(models.TransientModel):
                 })
                 creadas.append(component.display_name)
 
-        partes = []
+        extra_msg = ''
         if creadas:
-            partes.append(_('Reglas creadas para: %s') % ', '.join(creadas))
-        if omitidos:
-            partes.append(
-                _('Sin regla (no publicados en MELI): %s')
-                % ', '.join(omitidos))
-        extra_msg = '\n'.join(partes)
+            extra_msg = _('Reglas creadas para: %s') % ', '.join(creadas)
+        elif self.crear_regla_reabastecimiento:
+            extra_msg = _('Los componentes ya tenían regla de '
+                          'reabastecimiento.')
         return picking, extra_msg
