@@ -9,18 +9,38 @@
                 <group>
                     <group string="Producto y cantidad">
                         <field name="product_id"/>
+                        <field name="is_kit_product" invisible="1"/>
                         <field name="available_location_ids" invisible="1"/>
+                        <div colspan="2" invisible="not is_kit_product"
+                             class="alert alert-info" role="status">
+                            <strong>Kit.</strong> Se transfieren los componentes
+                            a MELI y se crean reglas por cada componente.
+                            <br/>
+                            <span class="text-muted">Componentes: </span>
+                            <field name="kit_components_info" class="oe_inline"
+                                   nolabel="1" readonly="1"/>
+                        </div>
                         <field name="source_location_id"
+                               invisible="is_kit_product"
                                context="{'stock_location_product_id': product_id}"
                                options="{'no_create': True, 'no_open': True}"/>
                         <field name="qty_to_transfer"/>
                         <label for="total_available_qty"
                                string="Disponible en R/S"
-                               invisible="not product_id"/>
-                        <div invisible="not product_id" class="text-muted">
+                               invisible="not product_id or is_kit_product"/>
+                        <div invisible="not product_id or is_kit_product"
+                             class="text-muted">
                             <field name="total_available_qty" class="oe_inline"
                                    nolabel="1" readonly="1"/>
                             <span> unidades</span>
+                        </div>
+                        <label for="total_available_qty"
+                               string="Kits armables con stock R/S"
+                               invisible="not is_kit_product"/>
+                        <div invisible="not is_kit_product" class="text-muted">
+                            <field name="total_available_qty" class="oe_inline"
+                                   nolabel="1" readonly="1"/>
+                            <span> kit(s)</span>
                         </div>
                         <field name="crear_regla_reabastecimiento"/>
                         <field name="min_stock"

@@ -23,6 +23,14 @@ class MeliPublicationWizard(models.TransientModel):
         default=10.0,
         required=True,
     )
+    is_kit_product = fields.Boolean(
+        'Es kit',
+        compute='_compute_is_kit_product',
+    )
+    kit_components_info = fields.Char(
+        'Componentes del kit',
+        compute='_compute_is_kit_product',
+    )
     available_location_ids = fields.Many2many(
         'stock.location',
         compute='_compute_available_location_ids',
@@ -110,12 +118,35 @@ class MeliPublicationWizard(models.TransientModel):
             res['dolar_rogrim'] = self._default_dolar_rogrim()
         return res
 
+    def _rs_available_qty(self, product, rs_loc):
+        """Unidades disponibles (sin reservar) de un producto en R/S."""
+        quants = self.env['stock.quant'].search([
+            ('product_id', '=', product.id),
+            ('location_id', 'child_of', rs_loc.id),
+        ])
+        return sum(max(0.0, q.quantity - q.reserved_quantity) for q in quants)
+
+    @api.depends('product_id')
+    def _compute_is_kit_product(self):
+        for w in self:
+            if w.product_id and w.product_id._meli_is_kit():
+                w.is_kit_product = True
+                comps = w.product_id._meli_kit_components()
+                w.kit_components_info = ', '.join(
+                    '%s ×%g' % (c.display_name, qty) for c, qty in comps
+                )
+            else:
+                w.is_kit_product = False
+                w.kit_components_info = False
+
     @api.depends('product_id')
     def _compute_available_location_ids(self):
         rule_model = self.env['meli.replenishment.rule']
         rs_loc = rule_model._get_rs_location()
         for w in self:
-            if not w.product_id or not rs_loc:
+            # Para kits no aplica elegir una sola ubicación (cada componente
+            # tiene las suyas); se resuelve automáticamente por componente.
+            if not w.product_id or not rs_loc or w.product_id._meli_is_kit():
                 w.available_location_ids = False
                 continue
             quants = self.env['stock.quant'].search([
@@ -145,14 +176,20 @@ class MeliPublicationWizard(models.TransientModel):
             if not w.product_id or not rs_loc:
                 w.total_available_qty = 0.0
                 continue
-            quants = self.env['stock.quant'].search([
-                ('product_id', '=', w.product_id.id),
-                ('location_id', 'child_of', rs_loc.id),
-            ])
-            total = sum(
-                max(0.0, q.quantity - q.reserved_quantity) for q in quants
-            )
-            w.total_available_qty = total
+            if w.product_id._meli_is_kit():
+                # Para un kit, "disponible" = cuántos kits se pueden armar con
+                # el stock de componentes en R/S (mínimo entre componentes).
+                comps = w.product_id._meli_kit_components()
+                buildable = []
+                for component, qty_per_kit in comps:
+                    if qty_per_kit <= 0:
+                        continue
+                    avail = w._rs_available_qty(component, rs_loc)
+                    buildable.append(int(avail // qty_per_kit))
+                w.total_available_qty = min(buildable) if buildable else 0.0
+            else:
+                w.total_available_qty = w._rs_available_qty(
+                    w.product_id, rs_loc)
 
     @api.depends('price_usd', 'dolar_rogrim')
     def _compute_precio_neto(self):
@@ -199,11 +236,45 @@ class MeliPublicationWizard(models.TransientModel):
         if self.precio_final <= 0:
             raise UserError(_('El precio final debe ser mayor a 0.'))
 
-        # Verificar que hay stock en R/S
         meli_replenishment = self.env['meli.replenishment.rule']
         rs_loc = meli_replenishment._get_rs_location()
         if not rs_loc:
             raise UserError(_('No se encontró la ubicación R/S configurada.'))
+
+        if self.product_id._meli_is_kit():
+            picking, extra_msg = self._confirm_kit(rs_loc)
+        else:
+            picking, extra_msg = self._confirm_single(rs_loc)
+
+        self.picking_id = picking.id
+
+        # Guardar Precio MELI (list_price = Precio de venta) en el producto.
+        # En este Odoo list_price ya incluye IVA (verificado contra
+        # publicaciones existentes), así que se carga el precio_final tal cual.
+        self.product_id.product_tmpl_id.list_price = self.precio_final
+
+        message = _(
+            'Transferencia: %s\n'
+            'Precio MELI guardado en producto: $%.2f'
+        ) % (picking.name, self.precio_final)
+        if extra_msg:
+            message += '\n' + extra_msg
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Publicación MELI creada'),
+                'message': message,
+                'type': 'success',
+                'sticky': bool(extra_msg),
+            },
+        }
+
+    def _confirm_single(self, rs_loc):
+        """Flujo de publicación para un producto individual (no kit).
+        Devuelve (picking, mensaje_extra)."""
+        meli_replenishment = self.env['meli.replenishment.rule']
 
         # Si el usuario eligió una ubicación, validar stock sólo en ella.
         src_domain = [
@@ -219,14 +290,12 @@ class MeliPublicationWizard(models.TransientModel):
             sin_stock_loc = rs_loc.complete_name
 
         rs_quants = self.env['stock.quant'].search(src_domain)
-
         if not rs_quants:
             raise UserError(
                 _('Sin stock disponible en %s para %s.')
                 % (sin_stock_loc, self.product_id.display_name)
             )
 
-        # Validar que qty_to_transfer no exceda el stock disponible
         available_qty = sum(
             max(0.0, q.quantity - q.reserved_quantity) for q in rs_quants
         )
@@ -237,9 +306,7 @@ class MeliPublicationWizard(models.TransientModel):
                 % (sin_stock_loc, available_qty, self.qty_to_transfer)
             )
 
-        # Evitar duplicar transferencias: si ya hay un movimiento pendiente
-        # hacia MELI para este producto, no crear otro (mismo chequeo que el
-        # cron en _check_and_replenish).
+        # Evitar duplicar transferencias pendientes hacia MELI.
         meli_loc = meli_replenishment._get_meli_location()
         if meli_loc:
             pending = self.env['stock.move'].search([
@@ -254,52 +321,97 @@ class MeliPublicationWizard(models.TransientModel):
                     % (self.product_id.display_name, pending.picking_id.name)
                 )
 
-        # Crear picking (desde la ubicación elegida, o automático si no se eligió)
-        picking = self.env['meli.replenishment.rule']._create_replenishment_picking(
+        picking = meli_replenishment._create_replenishment_picking(
             self.product_id,
             self.qty_to_transfer,
             forced_src_location=self.source_location_id or None,
         )
-
         if not picking:
-            raise UserError(_('No se pudo crear la transferencia. Intenta de nuevo.'))
+            raise UserError(
+                _('No se pudo crear la transferencia. Intenta de nuevo.'))
 
-        self.picking_id = picking.id
-
-        # Guardar Precio MELI (list_price = Precio de venta) en el producto.
-        # En este Odoo list_price ya incluye IVA (verificado contra publicaciones
-        # existentes), así que se carga el precio_final tal cual.
-        self.product_id.product_tmpl_id.list_price = self.precio_final
-
-        # Crear o actualizar regla de reabastecimiento
+        # Crear o actualizar regla de reabastecimiento del producto.
         if self.crear_regla_reabastecimiento:
             rule_vals = {
                 'percent_replenish': self.percent_replenish,
                 'min_stock': self.min_stock,
             }
-            # Setear ubicación origen si fue elegida en el wizard
             if self.source_location_id:
                 rule_vals['source_location_id'] = self.source_location_id.id
-
-            rule = self.env['meli.replenishment.rule'].search([
+            rule = meli_replenishment.search([
                 ('product_id', '=', self.product_id.id),
             ])
             if rule:
                 rule.write(rule_vals)
             else:
                 rule_vals['product_id'] = self.product_id.id
-                self.env['meli.replenishment.rule'].create(rule_vals)
+                meli_replenishment.create(rule_vals)
 
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': _('Publicación MELI creada'),
-                'message': _(
-                    'Transferencia: %s\n'
-                    'Precio MELI guardado en producto: $%.2f'
-                ) % (picking.name, self.precio_final),
-                'type': 'success',
-                'sticky': False,
-            },
-        }
+        return picking, ''
+
+    def _confirm_kit(self, rs_loc):
+        """Flujo de publicación para un kit: explota el kit en componentes,
+        transfiere cada uno a MELI y crea reglas por componente.
+        Devuelve (picking, mensaje_extra)."""
+        meli_replenishment = self.env['meli.replenishment.rule']
+        components = self.product_id._meli_kit_components()
+        if not components:
+            raise UserError(
+                _('El kit %s no tiene componentes en su lista de materiales.')
+                % self.product_id.display_name
+            )
+
+        # Cantidad necesaria por componente = qty_to_transfer × cantidad en BoM.
+        needed = [
+            (component, self.qty_to_transfer * qty_per_kit)
+            for component, qty_per_kit in components
+        ]
+
+        # Validar que cada componente tenga stock suficiente en R/S.
+        faltantes = []
+        for component, qty in needed:
+            avail = self._rs_available_qty(component, rs_loc)
+            if avail < qty:
+                faltantes.append((component, qty, avail))
+        if faltantes:
+            detalle = '\n'.join(
+                _('  - %s: necesita %.0f, disponible %.0f')
+                % (c.display_name, qty, avail)
+                for c, qty, avail in faltantes
+            )
+            raise UserError(
+                _('No hay stock suficiente en R/S para armar %.0f kit(s) de '
+                  '%s:\n%s')
+                % (self.qty_to_transfer, self.product_id.display_name, detalle)
+            )
+
+        picking, _faltantes = meli_replenishment._create_kit_replenishment_picking(
+            needed,
+        )
+        if not picking:
+            raise UserError(
+                _('No se pudo crear la transferencia de los componentes.'))
+
+        # Crear reglas de reabastecimiento por componente (las que falten).
+        creadas = []
+        if self.crear_regla_reabastecimiento:
+            for component, _qty_per_kit in components:
+                existing = meli_replenishment.search([
+                    ('product_id', '=', component.id),
+                ], limit=1)
+                if existing:
+                    continue
+                meli_replenishment.create({
+                    'product_id': component.id,
+                    'percent_replenish': self.percent_replenish,
+                    'min_stock': self.min_stock,
+                })
+                creadas.append(component.display_name)
+
+        extra_msg = ''
+        if creadas:
+            extra_msg = _('Reglas creadas para: %s') % ', '.join(creadas)
+        elif self.crear_regla_reabastecimiento:
+            extra_msg = _('Los componentes ya tenían regla de '
+                          'reabastecimiento.')
+        return picking, extra_msg

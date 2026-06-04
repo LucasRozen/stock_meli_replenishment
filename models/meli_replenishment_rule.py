@@ -61,6 +61,16 @@ class MeliReplenishmentRule(models.Model):
          'El stock mínimo no puede ser negativo.'),
     ]
 
+    @api.constrains('product_id')
+    def _check_product_not_kit(self):
+        for rule in self:
+            if rule.product_id and rule.product_id._meli_is_kit():
+                raise ValidationError(_(
+                    'No se puede crear una regla de reabastecimiento para un '
+                    'kit (%s). Los kits no tienen stock propio: creá reglas '
+                    'para sus componentes individuales.'
+                ) % rule.product_id.display_name)
+
     @api.depends('product_id')
     def _compute_available_location_ids(self):
         rs_loc = self._get_rs_location()
@@ -140,22 +150,12 @@ class MeliReplenishmentRule(models.Model):
         return meli_loc
 
     @api.model
-    def _create_replenishment_picking(self, product, qty, meli_loc=None,
-                                      rs_loc=None, forced_src_location=None):
-        """Crea picking R/S → MELI/Stock por la cantidad pedida.
-        Si se pasa forced_src_location, prioriza esa sub-ubicación y, si no
-        alcanza, completa con las demás sub-ubicaciones de R/S (mayor a menor).
-        El destino se calcula automáticamente por sufijo (R/S/x → MELI/Stock/x).
-        Devuelve el picking creado, o False si no hay stock disponible en R/S."""
-        if not meli_loc:
-            meli_loc = self._get_meli_location()
-        if not rs_loc:
-            rs_loc = self._get_rs_location()
-
-        if not meli_loc or not rs_loc:
-            return False
-
-        # 1. Sub-ubicaciones R/S con stock disponible (ordenadas por cantidad desc).
+    def _build_transfers_for_product(self, product, qty, meli_loc, rs_loc,
+                                     forced_src_location=None):
+        """Devuelve [(src_location, qty, dest_location), ...] para mover `qty`
+        unidades de `product` desde R/S a MELI, acumulando sub-ubicaciones de
+        mayor a menor stock. Si forced_src_location, prioriza esa y cae a las
+        demás cuando no alcanza. Lista vacía si no hay stock disponible."""
         rs_quants = self.env['stock.quant'].search([
             ('product_id', '=', product.id),
             ('location_id', 'child_of', rs_loc.id),
@@ -163,15 +163,8 @@ class MeliReplenishmentRule(models.Model):
         ], order='quantity desc')
 
         if not rs_quants:
-            _logger.warning(
-                'Sin stock en %s para %s, no se puede reabastecer.',
-                RS_STOCK_NAME, product.display_name,
-            )
-            return False
+            return []
 
-        # Si hay ubicación forzada, ordenar sus quants primero y el resto
-        # después (cada grupo por cantidad desc). Así se prioriza la fija y se
-        # cae automáticamente a las demás cuando no alcanza.
         if forced_src_location:
             forced_ids = self.env['stock.location'].search([
                 ('id', 'child_of', forced_src_location.id),
@@ -182,9 +175,8 @@ class MeliReplenishmentRule(models.Model):
             rest = rs_quants - forced
             rs_quants = forced + rest
 
-        # 2. Acumular ubicaciones de origen hasta cubrir qty.
         remaining = qty
-        transfers = []  # lista de (src_location, qty, dest_location)
+        transfers = []
         for quant in rs_quants:
             if remaining <= 0:
                 break
@@ -197,28 +189,29 @@ class MeliReplenishmentRule(models.Model):
             )
             transfers.append((quant.location_id, qty_from_this, dest))
             remaining -= qty_from_this
+        return transfers
 
-        if not transfers:
-            _logger.warning(
-                'Stock reservado impide el reabastecimiento de %s en %s.',
-                product.display_name, RS_STOCK_NAME,
-            )
+    @api.model
+    def _create_picking_from_lines(self, lines, meli_loc, rs_loc, origin):
+        """Crea UN picking interno R/S → MELI con un move por línea.
+        lines: [(product, src_location, qty, dest_location), ...].
+        Devuelve el picking, o False si lines está vacío."""
+        if not lines:
             return False
 
-        total_qty = sum(t[1] for t in transfers)
         picking_type = self._get_internal_picking_type(rs_loc)
 
-        # El picking usa la ubicación padre (R/S) para que Odoo muestre la sub-ubicación
-        # específica en la columna "Ubicacion de origen" del tab Operaciones.
+        # El picking usa la ubicación padre (R/S) para que Odoo muestre la
+        # sub-ubicación específica en la columna "Ubicacion de origen".
         picking = self.env['stock.picking'].create({
             'picking_type_id': picking_type.id,
             'location_id': rs_loc.id,
             'location_dest_id': meli_loc.id,
-            'origin': _('Reabastecimiento MELI - %s') % product.display_name,
+            'origin': origin,
         })
 
-        move_data = []  # [(move, src, qty, dest), ...]
-        for src, qty_move, dest in transfers:
+        move_data = []  # [(move, product, src, qty, dest), ...]
+        for product, src, qty_move, dest in lines:
             move = self.env['stock.move'].create({
                 'name': product.display_name,
                 'product_id': product.id,
@@ -233,7 +226,7 @@ class MeliReplenishmentRule(models.Model):
                 # (MELI/Stock/xx-YYY) en lugar del location_dest_id del picking
                 # padre (MELI/Stock).
             })
-            move_data.append((move, src, qty_move, dest))
+            move_data.append((move, product, src, qty_move, dest))
 
         picking.action_confirm()
         picking.action_assign()
@@ -250,7 +243,7 @@ class MeliReplenishmentRule(models.Model):
         # 'assigned' pero el stock de R/S figuraría disponible, y un despacho a
         # cliente podría reservar las mismas unidades -> R/S en negativo.
         # Por eso sólo corregimos el destino sobre las líneas ya reservadas.
-        for move, src, qty_move, dest in move_data:
+        for move, product, src, qty_move, dest in move_data:
             if move.location_dest_id != dest:
                 move.location_dest_id = dest.id
             if move.move_line_ids:
@@ -267,19 +260,85 @@ class MeliReplenishmentRule(models.Model):
                     'location_dest_id': dest.id,
                     'picking_id': picking.id,
                 })
-
-        sources_summary = ', '.join(
-            '%s (%.0f u.)' % (src.complete_name, qty_move)
-            for src, qty_move, _dest in transfers
-        )
-        _logger.info(
-            'Reabastecimiento creado: %s | %s → MELI | %.0f u. | Picking: %s',
-            product.display_name,
-            sources_summary,
-            total_qty,
-            picking.name,
-        )
         return picking
+
+    @api.model
+    def _create_replenishment_picking(self, product, qty, meli_loc=None,
+                                      rs_loc=None, forced_src_location=None):
+        """Crea picking R/S → MELI/Stock por la cantidad pedida de un producto.
+        Devuelve el picking creado, o False si no hay stock disponible en R/S."""
+        if not meli_loc:
+            meli_loc = self._get_meli_location()
+        if not rs_loc:
+            rs_loc = self._get_rs_location()
+
+        if not meli_loc or not rs_loc:
+            return False
+
+        transfers = self._build_transfers_for_product(
+            product, qty, meli_loc, rs_loc, forced_src_location,
+        )
+        if not transfers:
+            _logger.warning(
+                'Sin stock disponible en %s para %s, no se puede reabastecer.',
+                RS_STOCK_NAME, product.display_name,
+            )
+            return False
+
+        lines = [(product, src, q, dest) for src, q, dest in transfers]
+        origin = _('Reabastecimiento MELI - %s') % product.display_name
+        picking = self._create_picking_from_lines(
+            lines, meli_loc, rs_loc, origin,
+        )
+        if picking:
+            sources_summary = ', '.join(
+                '%s (%.0f u.)' % (src.complete_name, q)
+                for src, q, _dest in transfers
+            )
+            _logger.info(
+                'Reabastecimiento creado: %s | %s → MELI | %.0f u. | '
+                'Picking: %s',
+                product.display_name, sources_summary,
+                sum(t[1] for t in transfers), picking.name,
+            )
+        return picking
+
+    @api.model
+    def _create_kit_replenishment_picking(self, components, meli_loc=None,
+                                          rs_loc=None):
+        """Crea UN picking que explota un kit: mueve cada componente de R/S a
+        MELI. components: [(componente_product, qty_total), ...].
+        Devuelve (picking, faltantes), donde faltantes es
+        [(componente, qty_pedida, qty_movida), ...] para los que no había
+        stock suficiente. Si ningún componente tenía stock, picking es False."""
+        if not meli_loc:
+            meli_loc = self._get_meli_location()
+        if not rs_loc:
+            rs_loc = self._get_rs_location()
+
+        if not meli_loc or not rs_loc:
+            return False, []
+
+        lines = []
+        faltantes = []
+        for component, qty in components:
+            transfers = self._build_transfers_for_product(
+                component, qty, meli_loc, rs_loc,
+            )
+            moved = sum(t[1] for t in transfers)
+            if moved < qty:
+                faltantes.append((component, qty, moved))
+            for src, q, dest in transfers:
+                lines.append((component, src, q, dest))
+
+        if not lines:
+            return False, faltantes
+
+        origin = _('Reabastecimiento MELI (kit)')
+        picking = self._create_picking_from_lines(
+            lines, meli_loc, rs_loc, origin,
+        )
+        return picking, faltantes
 
     def _run_replenishment_cron(self):
         meli_loc = self._get_meli_location()
