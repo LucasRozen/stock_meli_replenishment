@@ -307,7 +307,9 @@ class MeliReplenishmentRule(models.Model):
     def _create_kit_replenishment_picking(self, components, meli_loc=None,
                                           rs_loc=None):
         """Crea UN picking que explota un kit: mueve cada componente de R/S a
-        MELI. components: [(componente_product, qty_total), ...].
+        MELI. components: [(componente_product, qty_total, forced_src|None),...]
+        forced_src (opcional) prioriza esa sub-ubicación R/S para ese
+        componente (con fallback a las demás).
         Devuelve (picking, faltantes), donde faltantes es
         [(componente, qty_pedida, qty_movida), ...] para los que no había
         stock suficiente. Si ningún componente tenía stock, picking es False."""
@@ -321,9 +323,9 @@ class MeliReplenishmentRule(models.Model):
 
         lines = []
         faltantes = []
-        for component, qty in components:
+        for component, qty, forced_src in components:
             transfers = self._build_transfers_for_product(
-                component, qty, meli_loc, rs_loc,
+                component, qty, meli_loc, rs_loc, forced_src,
             )
             moved = sum(t[1] for t in transfers)
             if moved < qty:

@@ -3,3 +3,5 @@ access_meli_replenishment_rule_user,meli.replenishment.rule.user,model_meli_repl
 access_meli_replenishment_rule_manager,meli.replenishment.rule.manager,model_meli_replenishment_rule,stock.group_stock_manager,1,1,1,1
 access_meli_publication_wizard_user,meli.publication.wizard.user,model_meli_publication_wizard,stock.group_stock_user,1,1,1,0
 access_meli_publication_wizard_manager,meli.publication.wizard.manager,model_meli_publication_wizard,stock.group_stock_manager,1,1,1,1
+access_meli_publication_wizard_kit_line_user,meli.publication.wizard.kit.line.user,model_meli_publication_wizard_kit_line,stock.group_stock_user,1,1,1,1
+access_meli_publication_wizard_kit_line_manager,meli.publication.wizard.kit.line.manager,model_meli_publication_wizard_kit_line,stock.group_stock_manager,1,1,1,1

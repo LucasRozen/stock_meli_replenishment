@@ -27,9 +27,9 @@ class MeliPublicationWizard(models.TransientModel):
         'Es kit',
         compute='_compute_is_kit_product',
     )
-    kit_components_info = fields.Char(
-        'Componentes del kit',
-        compute='_compute_is_kit_product',
+    kit_line_ids = fields.One2many(
+        'meli.publication.wizard.kit.line', 'wizard_id',
+        string='Componentes del kit',
     )
     available_location_ids = fields.Many2many(
         'stock.location',
@@ -129,15 +129,8 @@ class MeliPublicationWizard(models.TransientModel):
     @api.depends('product_id')
     def _compute_is_kit_product(self):
         for w in self:
-            if w.product_id and w.product_id._meli_is_kit():
-                w.is_kit_product = True
-                comps = w.product_id._meli_kit_components()
-                w.kit_components_info = ', '.join(
-                    '%s ×%g' % (c.display_name, qty) for c, qty in comps
-                )
-            else:
-                w.is_kit_product = False
-                w.kit_components_info = False
+            w.is_kit_product = bool(
+                w.product_id and w.product_id._meli_is_kit())
 
     @api.depends('product_id')
     def _compute_available_location_ids(self):
@@ -167,6 +160,19 @@ class MeliPublicationWizard(models.TransientModel):
             self.price_usd = self.product_id.product_tmpl_id.price_usd or 0.0
         else:
             self.price_usd = 0.0
+
+        # Poblar/limpiar las líneas de componentes según sea kit o no.
+        if self.product_id and self.product_id._meli_is_kit():
+            comps = self.product_id._meli_kit_components()
+            self.kit_line_ids = [(5, 0, 0)] + [
+                (0, 0, {
+                    'product_id': component.id,
+                    'qty_per_kit': qty_per_kit,
+                })
+                for component, qty_per_kit in comps
+            ]
+        else:
+            self.kit_line_ids = [(5, 0, 0)]
 
     @api.depends('product_id')
     def _compute_total_available_qty(self):
@@ -351,25 +357,34 @@ class MeliPublicationWizard(models.TransientModel):
 
     def _confirm_kit(self, rs_loc):
         """Flujo de publicación para un kit: explota el kit en componentes,
-        transfiere cada uno a MELI y crea reglas por componente.
-        Devuelve (picking, mensaje_extra)."""
+        transfiere cada uno a MELI (desde la ubicación elegida por línea) y
+        crea reglas por componente. Devuelve (picking, mensaje_extra)."""
         meli_replenishment = self.env['meli.replenishment.rule']
-        components = self.product_id._meli_kit_components()
-        if not components:
+
+        # needed: [(componente, qty_total, ubicacion_origen_forzada|None), ...]
+        if self.kit_line_ids:
+            needed = [
+                (line.product_id,
+                 self.qty_to_transfer * line.qty_per_kit,
+                 line.source_location_id or None)
+                for line in self.kit_line_ids if line.product_id
+            ]
+        else:
+            needed = [
+                (component, self.qty_to_transfer * qty_per_kit, None)
+                for component, qty_per_kit
+                in self.product_id._meli_kit_components()
+            ]
+
+        if not needed:
             raise UserError(
                 _('El kit %s no tiene componentes en su lista de materiales.')
                 % self.product_id.display_name
             )
 
-        # Cantidad necesaria por componente = qty_to_transfer × cantidad en BoM.
-        needed = [
-            (component, self.qty_to_transfer * qty_per_kit)
-            for component, qty_per_kit in components
-        ]
-
         # Validar que cada componente tenga stock suficiente en R/S.
         faltantes = []
-        for component, qty in needed:
+        for component, qty, _src in needed:
             avail = self._rs_available_qty(component, rs_loc)
             if avail < qty:
                 faltantes.append((component, qty, avail))
@@ -385,7 +400,7 @@ class MeliPublicationWizard(models.TransientModel):
                 % (self.qty_to_transfer, self.product_id.display_name, detalle)
             )
 
-        picking, _faltantes = meli_replenishment._create_kit_replenishment_picking(
+        picking, _f = meli_replenishment._create_kit_replenishment_picking(
             needed,
         )
         if not picking:
@@ -395,7 +410,7 @@ class MeliPublicationWizard(models.TransientModel):
         # Crear reglas de reabastecimiento por componente (las que falten).
         creadas = []
         if self.crear_regla_reabastecimiento:
-            for component, _qty_per_kit in components:
+            for component, _qty, _src in needed:
                 existing = meli_replenishment.search([
                     ('product_id', '=', component.id),
                 ], limit=1)
@@ -415,3 +430,69 @@ class MeliPublicationWizard(models.TransientModel):
             extra_msg = _('Los componentes ya tenían regla de '
                           'reabastecimiento.')
         return picking, extra_msg
+
+
+class MeliPublicationWizardKitLine(models.TransientModel):
+    _name = 'meli.publication.wizard.kit.line'
+    _description = 'Componente de kit en wizard de publicación MELI'
+
+    wizard_id = fields.Many2one(
+        'meli.publication.wizard', required=True, ondelete='cascade',
+    )
+    product_id = fields.Many2one(
+        'product.product', string='Componente', readonly=True,
+    )
+    qty_per_kit = fields.Float('Cant. por kit', readonly=True)
+    qty_needed = fields.Float(
+        'Necesita', compute='_compute_qty_needed',
+    )
+    available_location_ids = fields.Many2many(
+        'stock.location', compute='_compute_available_location_ids',
+    )
+    source_location_id = fields.Many2one(
+        'stock.location', string='Ubicación de origen (R/S)',
+        domain="[('id', 'in', available_location_ids)]",
+        help='Sub-ubicación R/S desde la que se tomará este componente. '
+             'Si se deja vacío, se toma automáticamente de la(s) que tengan '
+             'más stock.',
+    )
+    available_qty = fields.Float(
+        'Disponible en R/S', compute='_compute_available_qty',
+    )
+
+    @api.depends('wizard_id.qty_to_transfer', 'qty_per_kit')
+    def _compute_qty_needed(self):
+        for line in self:
+            line.qty_needed = line.wizard_id.qty_to_transfer * line.qty_per_kit
+
+    @api.depends('product_id')
+    def _compute_available_location_ids(self):
+        rs_loc = self.env['meli.replenishment.rule']._get_rs_location()
+        for line in self:
+            if not line.product_id or not rs_loc:
+                line.available_location_ids = False
+                continue
+            quants = self.env['stock.quant'].search([
+                ('product_id', '=', line.product_id.id),
+                ('location_id', 'child_of', rs_loc.id),
+                ('quantity', '>', 0),
+            ])
+            line.available_location_ids = quants.filtered(
+                lambda q: q.quantity - q.reserved_quantity > 0
+            ).mapped('location_id')
+
+    @api.depends('product_id', 'source_location_id')
+    def _compute_available_qty(self):
+        rs_loc = self.env['meli.replenishment.rule']._get_rs_location()
+        for line in self:
+            if not line.product_id or not rs_loc:
+                line.available_qty = 0.0
+                continue
+            loc = line.source_location_id or rs_loc
+            quants = self.env['stock.quant'].search([
+                ('product_id', '=', line.product_id.id),
+                ('location_id', 'child_of', loc.id),
+            ])
+            line.available_qty = sum(
+                max(0.0, q.quantity - q.reserved_quantity) for q in quants
+            )
