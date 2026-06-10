@@ -55,20 +55,21 @@
                         <field name="precio_final"/>
                     </group>
                 </group>
-                <group string="Componentes del kit" invisible="not is_kit_product">
-                    <field name="kit_line_ids" nolabel="1">
-                        <tree editable="bottom" create="false" delete="false">
-                            <field name="product_id" readonly="1"/>
-                            <field name="qty_per_kit" readonly="1"/>
-                            <field name="qty_needed" readonly="1"/>
-                            <field name="available_location_ids"
-                                   column_invisible="1"/>
-                            <field name="source_location_id"
-                                   options="{'no_create': True, 'no_open': True}"/>
-                            <field name="available_qty" readonly="1"/>
-                        </tree>
-                    </field>
-                </group>
+                <separator string="Componentes del kit"
+                           invisible="not is_kit_product"/>
+                <field name="kit_line_ids" nolabel="1"
+                       invisible="not is_kit_product">
+                    <tree editable="bottom" create="false" delete="false">
+                        <field name="product_id" readonly="1" force_save="1"/>
+                        <field name="qty_per_kit" readonly="1" force_save="1"/>
+                        <field name="qty_needed" readonly="1"/>
+                        <field name="available_location_ids"
+                               column_invisible="1"/>
+                        <field name="source_location_id"
+                               options="{'no_create': True, 'no_open': True}"/>
+                        <field name="available_qty" readonly="1"/>
+                    </tree>
+                </field>
                 <footer>
                     <button name="action_confirm" string="Confirmar" type="object" class="btn-primary"/>
                     <button string="Cancelar" class="btn-secondary" special="cancel"/>

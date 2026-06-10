@@ -361,26 +361,33 @@ class MeliPublicationWizard(models.TransientModel):
         crea reglas por componente. Devuelve (picking, mensaje_extra)."""
         meli_replenishment = self.env['meli.replenishment.rule']
 
-        # needed: [(componente, qty_total, ubicacion_origen_forzada|None), ...]
-        if self.kit_line_ids:
-            needed = [
-                (line.product_id,
-                 self.qty_to_transfer * line.qty_per_kit,
-                 line.source_location_id or None)
-                for line in self.kit_line_ids if line.product_id
-            ]
-        else:
-            needed = [
-                (component, self.qty_to_transfer * qty_per_kit, None)
-                for component, qty_per_kit
-                in self.product_id._meli_kit_components()
-            ]
-
-        if not needed:
+        # Los componentes se derivan SIEMPRE de la BoM (fuente autoritativa).
+        # No se confía en kit_line_ids para la identidad del componente: sus
+        # campos product_id/qty_per_kit son readonly y el cliente web no los
+        # reenvía al guardar, por lo que las líneas pueden llegar sin producto.
+        components = self.product_id._meli_kit_components()
+        if not components:
             raise UserError(
                 _('El kit %s no tiene componentes en su lista de materiales.')
                 % self.product_id.display_name
             )
+
+        # Ubicación de origen elegida por componente (desde las líneas del
+        # wizard). Si product_id no sobrevivió al guardado, queda vacío y se
+        # usa selección automática.
+        src_by_product = {
+            line.product_id.id: line.source_location_id
+            for line in self.kit_line_ids
+            if line.product_id and line.source_location_id
+        }
+
+        # needed: [(componente, qty_total, ubicacion_origen_forzada|None), ...]
+        needed = [
+            (component,
+             self.qty_to_transfer * qty_per_kit,
+             src_by_product.get(component.id) or None)
+            for component, qty_per_kit in components
+        ]
 
         # Validar que cada componente tenga stock suficiente en R/S.
         faltantes = []
