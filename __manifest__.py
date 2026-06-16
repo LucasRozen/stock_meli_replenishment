@@ -1,6 +1,6 @@
 {
     'name': 'Reabastecimiento MELI desde R/S',
-    'version': '17.0.4.2.0',
+    'version': '17.0.4.2.1',
     'category': 'Inventory',
     'summary': 'Repone N unidades en MELI/Stock desde R/S cuando el stock llega a 0',
     'depends': ['stock'],
