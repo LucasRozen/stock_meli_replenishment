@@ -27,9 +27,10 @@ class MeliReplenishmentRule(models.Model):
     )
     min_stock = fields.Float(
         'Stock mínimo en MELI', default=0.0, required=True,
-        help='Cuando el stock disponible en MELI/Stock sea menor o igual a '
-             'este valor, se dispara el reabastecimiento. Con 0, se repone '
-             'sólo cuando MELI llega a 0.',
+        help='Cuando el stock disponible en MELI/Stock sea MENOR a este valor '
+             '(estrictamente), se dispara el reabastecimiento. Al llegar justo '
+             'al mínimo todavía no repone. Nota: con 0 no repone nunca (el '
+             'stock no puede ser menor a 0); usá 1 para reponer al llegar a 0.',
     )
     available_location_ids = fields.Many2many(
         'stock.location',
@@ -367,8 +368,9 @@ class MeliReplenishmentRule(models.Model):
         ])
         total_meli = sum(q.quantity - q.reserved_quantity for q in meli_quants)
 
-        # Reabastecer sólo si el stock en MELI está en o por debajo del mínimo.
-        if total_meli > self.min_stock:
+        # Reabastecer sólo si el stock en MELI está por debajo del mínimo
+        # (estrictamente menor; al llegar justo al mínimo todavía no repone).
+        if total_meli >= self.min_stock:
             return
 
         # 2. Evitar duplicados: no crear si ya hay una transferencia pendiente hacia MELI
