@@ -254,15 +254,25 @@ class MeliPublicationWizard(models.TransientModel):
 
         self.picking_id = picking.id
 
+        # Validar el traslado en el acto (no esperar al cron). Si
+        # despacho_a_plaza aún no sincronizó numero.despacho, el helper deja el
+        # picking en 'assigned' sin romper y el cron lo reintenta.
+        validado = meli_replenishment._validate_replenishment_picking(picking)
+
         # Guardar Precio MELI (list_price = Precio de venta) en el producto.
         # En este Odoo list_price ya incluye IVA (verificado contra
         # publicaciones existentes), así que se carga el precio_final tal cual.
         self.product_id.product_tmpl_id.list_price = self.precio_final
 
+        estado = (
+            _('Transferencia %s validada (Hecho).') % picking.name
+            if validado else
+            _('Transferencia %s creada (queda en Listo; se validará '
+              'automáticamente en breve).') % picking.name
+        )
         message = _(
-            'Transferencia: %s\n'
-            'Precio MELI guardado en producto: $%.2f'
-        ) % (picking.name, self.precio_final)
+            '%s\nPrecio MELI guardado en producto: $%.2f'
+        ) % (estado, self.precio_final)
         if extra_msg:
             message += '\n' + extra_msg
 

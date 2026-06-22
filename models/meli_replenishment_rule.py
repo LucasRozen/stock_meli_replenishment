@@ -436,6 +436,57 @@ class MeliReplenishmentRule(models.Model):
             'last_source_location': picking.move_ids[0].location_id.id if picking.move_ids else False,
         })
 
+    @api.model
+    def _validate_replenishment_picking(self, picking):
+        """Valida UN picking de reabastecimiento MELI (assigned → done).
+
+        Devuelve True si quedó en 'done'. Si despacho_a_plaza lanza el error
+        transitorio (numero.despacho aún no sincronizado), devuelve False sin
+        romper, para que el cron reintente en el próximo ciclo. Lo usan tanto
+        el cron como el wizard de publicación (validación inmediata)."""
+        if picking.state == 'done':
+            return True
+        if picking.state != 'assigned':
+            return False
+        try:
+            result = picking.with_context(
+                skip_backorder=True,
+                is_barcode=True,
+            ).button_validate()
+            if isinstance(result, dict) and result.get('res_model'):
+                wizard = self.env[result['res_model']].browse(
+                    result.get('res_id'))
+                if wizard and hasattr(wizard, 'process'):
+                    wizard.process()
+                elif wizard and hasattr(wizard, 'apply'):
+                    wizard.apply()
+            if picking.state == 'done':
+                _logger.info('Picking %s validado automaticamente.',
+                             picking.name)
+                return True
+            _logger.warning(
+                'Picking %s no quedó en done (state=%s).',
+                picking.name, picking.state)
+            return False
+        except ValidationError as e:
+            msg = str(e)
+            # despacho_a_plaza lanza ValidationError cuando los
+            # numero.despacho aún no están sincronizados con el quant.
+            # Es un estado transitorio: el cron reintentará en 1 minuto.
+            if '[PICKING]' in msg or 'despacho' in msg.lower():
+                _logger.info(
+                    'Picking %s: numero.despacho aún no disponible '
+                    '(%s), se reintentará en el próximo ciclo.',
+                    picking.name, msg.strip())
+            else:
+                _logger.error(
+                    'Picking %s: error de validación: %s',
+                    picking.name, msg.strip())
+            return False
+        except Exception:
+            _logger.exception('Error al validar picking %s.', picking.name)
+            return False
+
     def validate_pending_replenishments(self):
         """Valida pickings de reabastecimiento MELI en estado 'assigned'."""
         pickings = self.env['stock.picking'].search([
@@ -444,41 +495,6 @@ class MeliReplenishmentRule(models.Model):
         ])
         validated = []
         for picking in pickings:
-            try:
-                result = picking.with_context(
-                    skip_backorder=True,
-                    is_barcode=True,
-                ).button_validate()
-                if isinstance(result, dict) and result.get('res_model'):
-                    wizard = self.env[result['res_model']].browse(
-                        result.get('res_id'))
-                    if wizard and hasattr(wizard, 'process'):
-                        wizard.process()
-                    elif wizard and hasattr(wizard, 'apply'):
-                        wizard.apply()
-                if picking.state == 'done':
-                    validated.append(picking.name)
-                    _logger.info('Picking %s validado automaticamente.',
-                                 picking.name)
-                else:
-                    _logger.warning(
-                        'Picking %s no quedó en done (state=%s).',
-                        picking.name, picking.state)
-            except ValidationError as e:
-                msg = str(e)
-                # despacho_a_plaza lanza ValidationError cuando los
-                # numero.despacho aún no están sincronizados con el quant.
-                # Es un estado transitorio: el cron reintentará en 1 minuto.
-                if '[PICKING]' in msg or 'despacho' in msg.lower():
-                    _logger.info(
-                        'Picking %s: numero.despacho aún no disponible '
-                        '(%s), se reintentará en el próximo ciclo.',
-                        picking.name, msg.strip())
-                else:
-                    _logger.error(
-                        'Picking %s: error de validación: %s',
-                        picking.name, msg.strip())
-            except Exception:
-                _logger.exception('Error al validar picking %s.',
-                                  picking.name)
+            if self._validate_replenishment_picking(picking):
+                validated.append(picking.name)
         return validated
