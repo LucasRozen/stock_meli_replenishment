@@ -26,11 +26,11 @@ class MeliReplenishmentRule(models.Model):
              'MELI/Stock cuando se ejecute el reabastecimiento.',
     )
     min_stock = fields.Float(
-        'Stock mínimo en MELI', default=0.0, required=True,
+        'Stock mínimo en MELI', default=1.0, required=True,
         help='Cuando el stock disponible en MELI/Stock sea MENOR a este valor '
              '(estrictamente), se dispara el reabastecimiento. Al llegar justo '
-             'al mínimo todavía no repone. Nota: con 0 no repone nunca (el '
-             'stock no puede ser menor a 0); usá 1 para reponer al llegar a 0.',
+             'al mínimo todavía no repone. Con el default 1, repone al llegar a '
+             '0. Nota: con 0 no repone nunca (el stock no puede ser menor a 0).',
     )
     available_location_ids = fields.Many2many(
         'stock.location',
