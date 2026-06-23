@@ -92,10 +92,11 @@ class MeliPublicationWizard(models.TransientModel):
     )
     min_stock = fields.Float(
         'Stock mínimo en MELI',
-        default=0.0,
-        help='Cuando el stock en MELI/Stock sea menor o igual a este valor, '
-             'se dispara el reabastecimiento. Con 0, se repone sólo cuando '
-             'MELI llega a 0.',
+        default=1.0,
+        help='Stock mínimo de las reglas que se creen al publicar. Se repone '
+             'cuando el stock en MELI/Stock sea MENOR a este valor '
+             '(estrictamente). Con el default 1, repone al llegar a 0; con 0 '
+             'no repone nunca.',
     )
     picking_id = fields.Many2one(
         'stock.picking',
