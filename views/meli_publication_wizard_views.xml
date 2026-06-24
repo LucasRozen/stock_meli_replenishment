@@ -6,17 +6,32 @@
         <field name="model">meli.publication.wizard</field>
         <field name="arch" type="xml">
             <form string="Nueva publicación MELI">
+                <field name="stock_suficiente" invisible="1"/>
+                <field name="currency_id" invisible="1"/>
+                <field name="usd_currency_id" invisible="1"/>
+                <div class="text-muted mb-2">
+                    Transfiere stock de R/S a MELI/Stock, fija el Precio MELI en
+                    el producto y, opcionalmente, crea la regla de
+                    reabastecimiento automático.
+                </div>
+                <div class="alert alert-warning" role="alert"
+                     invisible="stock_suficiente or not product_id">
+                    <i class="fa fa-exclamation-triangle"/>
+                    <field name="stock_warning" nolabel="1" readonly="1"
+                           class="oe_inline"/>
+                </div>
                 <group>
                     <group string="Producto y cantidad">
-                        <field name="product_id"/>
+                        <field name="product_id"
+                               placeholder="Buscar producto sin publicar..."/>
                         <field name="is_kit_product" invisible="1"/>
                         <field name="available_location_ids" invisible="1"/>
                         <div colspan="2" invisible="not is_kit_product"
                              class="alert alert-info" role="status">
                             <strong>Kit.</strong> Elegí abajo la ubicación de
                             origen de cada componente (o dejala vacía para que
-                            se tome automáticamente). Se crea una regla por
-                            componente.
+                            se tome automáticamente la de más stock). Se crea una
+                            regla por componente.
                         </div>
                         <field name="source_location_id"
                                invisible="is_kit_product"
@@ -26,8 +41,7 @@
                         <label for="total_available_qty"
                                string="Disponible en R/S"
                                invisible="not product_id or is_kit_product"/>
-                        <div invisible="not product_id or is_kit_product"
-                             class="text-muted">
+                        <div invisible="not product_id or is_kit_product">
                             <field name="total_available_qty" class="oe_inline"
                                    nolabel="1" readonly="1"/>
                             <span> unidades</span>
@@ -35,7 +49,7 @@
                         <label for="total_available_qty"
                                string="Kits armables con stock R/S"
                                invisible="not is_kit_product"/>
-                        <div invisible="not is_kit_product" class="text-muted">
+                        <div invisible="not is_kit_product">
                             <field name="total_available_qty" class="oe_inline"
                                    nolabel="1" readonly="1"/>
                             <span> kit(s)</span>
@@ -47,32 +61,40 @@
                                invisible="not crear_regla_reabastecimiento"/>
                     </group>
                     <group string="Precio">
-                        <field name="price_usd" readonly="1"/>
+                        <field name="price_usd" widget="monetary"
+                               options="{'currency_field': 'usd_currency_id'}"/>
                         <field name="dolar_rogrim"/>
-                        <field name="precio_neto" readonly="1"/>
-                        <field name="gasto_fijo" readonly="1"/>
-                        <field name="precio_base" readonly="1"/>
-                        <field name="precio_final"/>
+                        <field name="precio_neto" widget="monetary" readonly="1"/>
+                        <field name="gasto_fijo" widget="monetary" readonly="1"/>
+                        <field name="precio_base" widget="monetary" readonly="1"
+                               string="Precio sugerido"/>
+                        <separator string="Precio a publicar" colspan="2"/>
+                        <field name="precio_final" widget="monetary"
+                               string="Precio final (con IVA)"/>
                     </group>
                 </group>
                 <separator string="Componentes del kit"
                            invisible="not is_kit_product"/>
                 <field name="kit_line_ids" nolabel="1"
                        invisible="not is_kit_product">
-                    <tree editable="bottom" create="false" delete="false">
+                    <tree editable="bottom" create="false" delete="false"
+                          decoration-danger="available_qty &lt; qty_needed">
                         <field name="product_id" readonly="1" force_save="1"/>
                         <field name="qty_per_kit" readonly="1" force_save="1"/>
                         <field name="qty_needed" readonly="1"/>
                         <field name="available_location_ids"
                                column_invisible="1"/>
                         <field name="source_location_id"
+                               context="{'stock_location_product_id': product_id}"
                                options="{'no_create': True, 'no_open': True}"/>
                         <field name="available_qty" readonly="1"/>
                     </tree>
                 </field>
                 <footer>
-                    <button name="action_confirm" string="Confirmar" type="object" class="btn-primary"/>
-                    <button string="Cancelar" class="btn-secondary" special="cancel"/>
+                    <button name="action_confirm" string="Publicar" type="object"
+                            class="btn-primary"/>
+                    <button string="Cancelar" class="btn-secondary"
+                            special="cancel"/>
                 </footer>
             </form>
         </field>

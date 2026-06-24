@@ -49,6 +49,21 @@ class MeliPublicationWizard(models.TransientModel):
         compute='_compute_total_available_qty',
         readonly=True,
     )
+    stock_suficiente = fields.Boolean(
+        compute='_compute_stock_warning',
+    )
+    stock_warning = fields.Char(
+        compute='_compute_stock_warning',
+    )
+    currency_id = fields.Many2one(
+        'res.currency', string='Moneda',
+        default=lambda self: self.env.company.currency_id,
+    )
+    usd_currency_id = fields.Many2one(
+        'res.currency', string='Moneda USD',
+        default=lambda self: self.env.ref(
+            'base.USD', raise_if_not_found=False),
+    )
     price_usd = fields.Float(
         'Precio USD',
         readonly=True,
@@ -197,6 +212,30 @@ class MeliPublicationWizard(models.TransientModel):
             else:
                 w.total_available_qty = w._rs_available_qty(
                     w.product_id, rs_loc)
+
+    @api.depends('product_id', 'qty_to_transfer', 'total_available_qty',
+                 'is_kit_product')
+    def _compute_stock_warning(self):
+        for w in self:
+            w.stock_suficiente = True
+            w.stock_warning = False
+            if not w.product_id or w.qty_to_transfer <= 0:
+                continue
+            if w.qty_to_transfer > w.total_available_qty:
+                w.stock_suficiente = False
+                if w.is_kit_product:
+                    w.stock_warning = _(
+                        'Pedís %(pide).0f kit(s) pero con el stock de '
+                        'componentes en R/S sólo se pueden armar %(hay).0f. '
+                        'Bajá la cantidad o reponé componentes.'
+                    ) % {'pide': w.qty_to_transfer,
+                         'hay': w.total_available_qty}
+                else:
+                    w.stock_warning = _(
+                        'Pedís %(pide).0f unidades pero en R/S hay %(hay).0f '
+                        'disponibles. Bajá la cantidad o reponé stock.'
+                    ) % {'pide': w.qty_to_transfer,
+                         'hay': w.total_available_qty}
 
     @api.depends('price_usd', 'dolar_rogrim')
     def _compute_precio_neto(self):
